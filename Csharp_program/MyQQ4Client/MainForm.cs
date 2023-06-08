@@ -8,20 +8,25 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using MyQQ4Client;
+using Message;
 
 namespace MyQQ4Client
 {
     public partial class MainForm : Form
     {
         Database db = new Database();
-        SqlUtils sqlUtils = new SqlUtils();
+        public SqlUtils sqlUtils = new SqlUtils();
+        public List<Msg> notices = new List<Msg>();
+       
         public static String myname = "buaa"; //名字
-        public MainForm(EventHandler b1Click, EventHandler b2Click, EventHandler b3Click)
+        public MainForm(EventHandler b1Click, EventHandler b2Click, EventHandler b3Click,EventHandler b4Click)
         {
             InitializeComponent();
             this.buttonConnect.Click += b1Click;
             this.buttonSend.Click += b2Click;
             this.buttonAddFriend.Click += b3Click;
+            //this.noticeButton.Click += b4Click;
+            this.noticeLable.Click += b4Click;
             sqlUtils.setDB(db);
             sqlUtils.GetContent();
 
@@ -105,5 +110,6 @@ namespace MyQQ4Client
                 this.buttonSend.Enabled = enabled;
             }
         }
+
     }
 }

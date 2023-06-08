@@ -5,6 +5,11 @@ using System.Net;
 using System.Net.Sockets;
 using System.Threading;
 using System.Text;
+using System.IO;
+using System.Runtime.Serialization.Formatters.Binary;
+using MySqlX.XDevAPI.Common;
+using System.Text.RegularExpressions;
+using Message;
 
 namespace MyQQ
 {
@@ -15,6 +20,7 @@ namespace MyQQ
         static IPEndPoint point = null;
 
         static Dictionary<string, Socket> allClientSockets = null;
+        static Dictionary<string, Socket> idIpDic = null;
 
         static MainForm form = null;
         /// <summary>
@@ -24,6 +30,7 @@ namespace MyQQ
         static void Main()
         {
             allClientSockets = new Dictionary<string, Socket>();
+            idIpDic = new Dictionary<string, Socket>();
 
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
@@ -33,7 +40,7 @@ namespace MyQQ
         }
 
         static EventHandler bListenClick = SetListen;
-        static EventHandler bSendClick = SendMsg;
+        static EventHandler bSendClick = SendText;
 
         static void SetListen(object sender, EventArgs e)
         {
@@ -97,20 +104,50 @@ namespace MyQQ
                     //获取发送过来的消息容器
                     byte[] buf = new byte[1024 * 1024 * 2];
                     int len = clientSocket.Receive(buf);
+               
                     //有效字节为0则跳过
                     if (len == 0) break;
 
-                    string s = Encoding.UTF8.GetString(buf, 0, len);
-                    form.Println($"{clientPoint}: {s}");
-
-                    foreach (Socket t in allClientSockets.Values)
+                    //反序列化
+                    BinaryFormatter formatter = new BinaryFormatter();
+                    using (System.IO.MemoryStream ms = new MemoryStream(buf, 0, len))
                     {
-                        byte[] sendee = Encoding.UTF8.GetBytes($"{clientPoint}: {s}");
-                        t.Send(sendee);
-                    }
-
-                    //byte[] sendee = Encoding.UTF8.GetBytes("服务器返回信息");
-                    //clientSocket.Send(sendee);
+                        Msg msg = (Msg)formatter.Deserialize(ms);
+                        //form.Println("反序列化成功了");
+                        form.Println($"{clientPoint}: {msg.content}");
+                        switch (msg.type)
+                        {
+                            //文本消息,直接转发
+                            case MsgType.Text:
+                                MsgType type = MsgType.Text;
+                                string content = msg.content;
+                                if (content == "") break;
+                                foreach (Socket t in allClientSockets.Values)
+                                {
+                                    SendMsg(type, content, t);
+                                }
+                                    break;
+                            //通知消息
+                            case MsgType.Notice:
+                                HandleNoticeMessage(msg);
+                                break;
+                            //检查在线消息
+                            case MsgType.CheckOnline:
+                                HandleCheckOnlineMessage(msg,clientSocket);
+                                break;
+                            //客户端连接服务器就会发送这个消息，服务器存储到id、ip映射中
+                            case MsgType.ConnectMessage:
+                                Regex regex = new Regex(@"id:\s*(\d+)"); // 定义正则表达式
+                                Match match = regex.Match(msg.content); // 匹配字符串
+                                if (match.Success)
+                                {
+                                    string id = match.Groups[1].Value; // 提取 id 属性值
+                                    idIpDic.Add(id, clientSocket);
+                                }
+                                break;
+                            default: break;
+                        }
+                    }    
                 }
                 catch (SocketException e)
                 {
@@ -128,16 +165,73 @@ namespace MyQQ
             }
         }
 
-        static void SendMsg(object sender, EventArgs e)
+        //消息发送
+        public static void SendMsg(MsgType type, string content, Socket clientSocket )
         {
-            string msg = form.GetMsgText();
-            if (msg == "") return;
-            byte[] sendee = Encoding.UTF8.GetBytes($"服务器：{msg}");
-            foreach (Socket s in allClientSockets.Values)
-                s.Send(sendee);
-            form.Println(msg);
-            form.ClearMsgText();
+            Msg msg = new Msg();
+            msg.type = type;
+            msg.content = content;
+            //序列化
+            BinaryFormatter formatter = new BinaryFormatter();
+            using (MemoryStream ms = new MemoryStream())
+            {
+                formatter.Serialize(ms, msg);
+                byte[] data = ms.ToArray();
+
+                // 使用 Socket 发送msg class
+                clientSocket.Send(data);
+            }
         }
 
+        //发送文本（群）
+        static void SendText(object sender, EventArgs e)
+        {
+            MsgType type = MsgType.Text;
+            string content = form.GetMsgText();
+            if (content == "") return;
+            foreach (Socket s in allClientSockets.Values)
+            {
+                SendMsg(type, content, s);
+            }
+
+            form.Println(content);
+            form.ClearMsgText();
+        }
+        //处理通知
+        static void HandleNoticeMessage(Msg msg)
+        {
+            //用正则表达式截取括号内的Id
+            Regex regex = new Regex(@"\((.*?)\)");
+
+            //获取匹配结果
+            Match match = regex.Match(msg.content);
+            string id = match.Groups[1].Value;
+
+            if(match.Success )
+            {
+                //去字典找对应socket
+                Socket destination = idIpDic[id];
+
+                //发送通知
+                SendMsg(msg.type, msg.content, destination);
+            }
+            
+        }
+        //处理检查在线
+        static void HandleCheckOnlineMessage(Msg msg, Socket clientSockt)
+        {
+            string onlineState;
+            //连接中有这个ip，则设置在线标志为online
+            if (idIpDic.ContainsKey(msg.content))
+            {
+                onlineState = "online";
+            }
+            else
+            {
+                onlineState = "offline";
+            }
+
+            SendMsg(MsgType.CheckOnline, onlineState, clientSockt);
+        }
     }
 }

@@ -6,10 +6,12 @@ using System.Drawing;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using MyQQ4Client;
 using MySqlX.XDevAPI.Common;
+using Message;
 
 
 // 添加好友窗口
@@ -27,8 +29,6 @@ namespace MyQQ4Client
             InitializeComponent();
             sqlUtils = new SqlUtils();
         }
-
-
 
         private void InitializeComponent()
         {
@@ -94,7 +94,25 @@ namespace MyQQ4Client
                 if(sqlUtils.IsExistUser(FriendID))
                 {
                     Console.WriteLine("1");
-                    //暂时没有得到自己sid的方法，晚些修改
+                    //只支持在线添加好友
+                    //检查好友是否在线
+                    try
+                    {
+                        //发送检查
+                        Program.SendCheckOnline(FriendID);
+                        //等2s
+                        Thread.Sleep(2000);
+                        if(GlobalVariables.isOnline == "offline")
+                        {
+                            MessageBox.Show("好友不在线");
+                            return;
+                        }
+                        
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show(ex.ToString());
+                    }
                     string result = sqlUtils.getSelfId(MainForm.myname);
                     Regex regex = new Regex(@"id:\s*(\d+)"); // 定义正则表达式
                     Match match = regex.Match(result); // 匹配字符串
@@ -103,10 +121,9 @@ namespace MyQQ4Client
                         string idValue = match.Groups[1].Value; // 提取 id 属性值
                         int id = int.Parse(idValue); // 将字符串转换为整数类型的值
 
-                        if (sqlUtils.AddFriend(id, Convert.ToInt32(FriendID)))
-                        {
-                            MessageBox.Show("添加成功");
-                        }
+                        MsgType type = MsgType.Notice;
+                        string content = MainForm.myname + "(" + id + ")";
+                        Program.SendMsg(type, content);
                     }
                     else {
 
